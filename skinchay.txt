@@ -1,0 +1,226 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ContextActionService = game:GetService("ContextActionService")
+local UserInputService = game:GetService("UserInputService")
+
+local player = Players.LocalPlayer
+
+local boostKey = Enum.KeyCode.LeftShift
+local tauntDuration = 1
+local tauntCooldownTime = 1
+
+local runAnimId   = "rbxassetid://85752365414182"
+local jumpAnimId  = "rbxassetid://656117878"
+local tauntAnimId = "rbxassetid://131991078572593"
+local idleAnimId  = "rbxassetid://507766666"
+local fakeDeathAnimId = "rbxassetid://82378425345026"
+
+local boostActive = false
+local tauntCooldown = false
+
+local humanoid, rootPart, character
+local runTrack, jumpTrack, tauntTrack, idleTrack
+local leftFootSmoke, rightFootSmoke, leftFootTrail, rightFootTrail
+
+local fakeDeathTrack = nil
+local isFakingDeath = false
+
+local function createTrailAttachment(part, name, position)
+local a = Instance.new("Attachment")
+a.Name = name
+a.Position = position
+a.Parent = part
+return a
+end
+
+local function loadAnimations()
+local runAnim = Instance.new("Animation")
+runAnim.AnimationId = runAnimId
+runTrack = humanoid:LoadAnimation(runAnim)
+
+local jumpAnim = Instance.new("Animation")  
+jumpAnim.AnimationId = jumpAnimId  
+jumpTrack = humanoid:LoadAnimation(jumpAnim)  
+jumpTrack.Looped = false  
+jumpTrack.Priority = Enum.AnimationPriority.Action  
+
+local tauntAnim = Instance.new("Animation")  
+tauntAnim.AnimationId = tauntAnimId  
+tauntTrack = humanoid:LoadAnimation(tauntAnim)  
+
+local idleAnim = Instance.new("Animation")  
+idleAnim.AnimationId = idleAnimId  
+idleTrack = humanoid:LoadAnimation(idleAnim)  
+idleTrack.Priority = Enum.AnimationPriority.Idle  
+idleTrack:AdjustSpeed(0.5)
+
+end
+
+local function doTaunt()
+if tauntCooldown then return end
+tauntCooldown = true
+if runTrack.IsPlaying then runTrack:Stop() end
+if idleTrack.IsPlaying then idleTrack:Stop() end
+if jumpTrack.IsPlaying then jumpTrack:Stop() end
+tauntTrack:Play()
+
+task.delay(tauntDuration, function()  
+	tauntTrack:Stop()  
+	if humanoid.MoveDirection.Magnitude <= 0 then  
+		idleTrack:Play()  
+	else  
+		runTrack:Play()  
+	end  
+end)  
+
+task.delay(tauntCooldownTime, function()  
+	tauntCooldown = false  
+end)
+
+end
+
+local function setupVFX()
+local leftFoot = character:FindFirstChild("LeftFoot") or character:FindFirstChild("Left Leg")
+local rightFoot = character:FindFirstChild("RightFoot") or character:FindFirstChild("Right Leg")
+if not (leftFoot and rightFoot) then return end
+
+local function makeSmoke(parent)  
+	local e = Instance.new("ParticleEmitter")  
+	e.Enabled = false  
+	e.Texture = "rbxassetid://7712212245"  
+	e.Parent = parent  
+	return e  
+end  
+
+leftFootSmoke = makeSmoke(leftFoot)  
+rightFootSmoke = makeSmoke(rightFoot)  
+
+local leftStart  = createTrailAttachment(leftFoot, "TrailStart", Vector3.new(0, 0.3, 0))  
+local leftEnd    = createTrailAttachment(leftFoot, "TrailEnd",   Vector3.new(0, -0.3, -0.5))  
+local rightStart = createTrailAttachment(rightFoot, "TrailStart",Vector3.new(0, 0.3, 0))  
+local rightEnd   = createTrailAttachment(rightFoot, "TrailEnd",  Vector3.new(0, -0.3, -0.5))  
+
+leftFootTrail = Instance.new("Trail")  
+leftFootTrail.Attachment0 = leftStart  
+leftFootTrail.Attachment1 = leftEnd  
+leftFootTrail.Enabled = false  
+leftFootTrail.Parent = leftFoot  
+
+rightFootTrail = Instance.new("Trail")  
+rightFootTrail.Attachment0 = rightStart  
+rightFootTrail.Attachment1 = rightEnd  
+rightFootTrail.Enabled = false  
+rightFootTrail.Parent = rightFoot
+
+end
+
+local function toggleFakeDeath(_, inputState)
+if inputState == Enum.UserInputState.Begin then
+if not isFakingDeath then
+fakeDeathTrack:Play()
+isFakingDeath = true
+else
+fakeDeathTrack:Stop()
+isFakingDeath = false
+end
+end
+end
+
+local function setupCharacter(char)
+character = char
+humanoid  = char:WaitForChild("Humanoid")
+rootPart  = char:WaitForChild("HumanoidRootPart")
+
+boostActive = false  
+tauntCooldown = false  
+
+humanoid.UseJumpPower = true  
+humanoid.JumpPower = 50  
+
+loadAnimations()  
+idleTrack:Play()  
+setupVFX()  
+
+local fakeDeathAnim = Instance.new("Animation")  
+fakeDeathAnim.AnimationId = fakeDeathAnimId  
+fakeDeathTrack = humanoid:LoadAnimation(fakeDeathAnim)  
+
+humanoid.StateChanged:Connect(function(_, newState)  
+	if newState == Enum.HumanoidStateType.Jumping then  
+		if not tauntCooldown then  
+			if runTrack.IsPlaying then runTrack:Stop() end  
+			if idleTrack.IsPlaying then idleTrack:Stop() end  
+			jumpTrack:Play()  
+		end  
+
+	elseif newState == Enum.HumanoidStateType.Freefall then  
+		if not jumpTrack.IsPlaying then  
+			jumpTrack:Play()  
+		end  
+
+	elseif newState == Enum.HumanoidStateType.Landed then  
+		if jumpTrack.IsPlaying then jumpTrack:Stop() end  
+
+		if humanoid.MoveDirection.Magnitude > 0 then  
+			runTrack:Play()  
+		else  
+			idleTrack:Play()  
+		end  
+	end  
+end)  
+
+ContextActionService:BindAction("FakeDeathToggle", toggleFakeDeath, false, Enum.KeyCode.F)
+
+end
+
+RunService.Heartbeat:Connect(function()
+if not humanoid then return end
+
+local moveDir = humanoid.MoveDirection  
+
+if moveDir.Magnitude > 0 then  
+	if boostActive then  
+		if leftFootSmoke then leftFootSmoke.Enabled = true end  
+		if rightFootSmoke then rightFootSmoke.Enabled = true end  
+		if leftFootTrail then leftFootTrail.Enabled = true end  
+		if rightFootTrail then rightFootTrail.Enabled = true end  
+	else  
+		if leftFootSmoke then leftFootSmoke.Enabled = false end  
+		if rightFootSmoke then rightFootSmoke.Enabled = false end  
+		if leftFootTrail then leftFootTrail.Enabled = false end  
+		if rightFootTrail then rightFootTrail.Enabled = false end  
+	end  
+
+	if not runTrack.IsPlaying and not tauntCooldown then  
+		idleTrack:Stop()  
+		runTrack:Play()  
+	end  
+else  
+	if runTrack.IsPlaying then runTrack:Stop() end  
+
+	if leftFootSmoke then leftFootSmoke.Enabled = false end  
+	if rightFootSmoke then rightFootSmoke.Enabled = false end  
+	if leftFootTrail then leftFootTrail.Enabled = false end  
+	if rightFootTrail then rightFootTrail.Enabled = false end  
+
+	if not idleTrack.IsPlaying and not tauntCooldown then  
+		idleTrack:Play()  
+	end  
+end
+
+end)
+
+ContextActionService:BindAction("Taunt", function(_, state)
+if state == Enum.UserInputState.Begin then doTaunt() end
+end, false, Enum.KeyCode.T)
+
+ContextActionService:BindAction("Boost", function(_, state)
+if state == Enum.UserInputState.Begin then
+boostActive = true
+elseif state == Enum.UserInputState.End then
+boostActive = false
+end
+end, false, boostKey)
+
+player.CharacterAdded:Connect(setupCharacter)
+if player.Character then setupCharacter(player.Character) end
